@@ -350,5 +350,16 @@
     "artists": "nirvana, deftones, superheaven",
     "roles": "instrumentalist",
     "geek": "photography,sports"
-  }
+  },
+  {
+  "id": "s-33",
+  "name": "krish",
+  "year": "year 10",
+  "collab": "yes",
+  "instruments": "guitar,bass",
+  "genres": "rock,punk,heavy metal,electronic,rap",
+  "artists": "nirvana, iron maiden, radiohead",
+  "roles": "instrumentalist",
+  "geek": "gaming,film,sports"
+}
 ]

@@ -5,7 +5,7 @@ import datasetRaw from "./data.json";
    CONSTELLATION CIRCLE (single-select)
    - Symmetrical year-group constellations around a big circle
    - Year labels inside each constellation ("Year 7", "Year 8", ...)
-   - Straight connection lines (no 3D)
+   - Straight connection lines
    - Connection mode dropdown (instrument / influences / ideal band)
    - Year filter (All / Y7 / Y8 / ...)
    - Links Top-N slider (min 3)
@@ -144,7 +144,9 @@ function computeConstellationPositions(data, W, H) {
 
     sorted.forEach((d, i) => {
       const a =
-        count <= 1 ? localOffset : localOffset + (i / count) * Math.PI * 2;
+        count <= 1
+          ? localOffset
+          : localOffset + (i / count) * Math.PI * 2;
 
       nodes.push({
         ...d,
@@ -167,7 +169,7 @@ function FillBar({ value01 }) {
         width: 92,
         height: 10,
         border: "1px solid rgba(0,255,100,0.45)",
-        background: "rgba(0,255,100,0.10)",
+        background: "rgba(0,255,100,0.1)",
         overflow: "hidden",
       }}
     >
@@ -201,16 +203,16 @@ export default function App() {
   const dataset = useMemo(() => normalizeDataset(datasetRaw), []);
 
   const years = useMemo(() => {
-    const ys = Array.from(
+    return Array.from(
       new Set(dataset.map((d) => d.year).filter((y) => y != null))
     ).sort((a, b) => a - b);
-    return ys;
   }, [dataset]);
 
   const [mode, setMode] = useState("band"); // instrument | influences | band
   const [yearFilter, setYearFilter] = useState("all"); // all | number (as string)
   const [topN, setTopN] = useState(10);
   const [query, setQuery] = useState("");
+  const [active, setActive] = useState(null);
 
   const filtered = useMemo(() => {
     if (yearFilter === "all") return dataset;
@@ -218,14 +220,13 @@ export default function App() {
     return dataset.filter((d) => d.year === y);
   }, [dataset, yearFilter]);
 
-  const layout = useMemo(
-    () => computeConstellationPositions(filtered, W, H),
-    [filtered, W, H]
-  );
+  const layout = useMemo(() => computeConstellationPositions(filtered, W, H), [
+    filtered,
+    W,
+    H,
+  ]);
   const nodes = layout.nodes;
   const yearGroups = layout.groups;
-
-  const [active, setActive] = useState(null);
 
   useEffect(() => {
     if (!active) return;
@@ -252,12 +253,13 @@ export default function App() {
 
   const links = useMemo(() => {
     if (!active) return [];
+
     const scored = nodes
       .filter((n) => n.id !== active.id)
       .map((n) => ({ n, s: similarityScore(active, n, mode) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s)
-      .slice(0, clamp(topN, 1, 40));
+      .slice(0, clamp(topN, 3, 40));
 
     const max = scored[0]?.s ?? 1;
 
@@ -309,6 +311,7 @@ export default function App() {
     setActive(orderedNodes[nextIdx]);
   };
 
+  // No eslint-disable comment, no react-hooks rule required
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === "ArrowRight") {
@@ -320,7 +323,6 @@ export default function App() {
       } else if (e.key === "Escape") {
         setActive(null);
       } else if (e.key === "Enter") {
-        // quick select top match from search results
         const q = query.trim().toLowerCase();
         if (!q) return;
         const match = nodes
@@ -330,10 +332,10 @@ export default function App() {
         if (match) setActive(match);
       }
     };
+
     window.addEventListener("keydown", onKeyDown, { passive: false });
     return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, orderedNodes, query, nodes]);
+  }, [query, nodes, active, orderedNodes]);
 
   const wheelCooldown = useRef(0);
   const onWheel = (e) => {
@@ -363,7 +365,7 @@ export default function App() {
   return (
     <div style={{ background: "#000", height: "100vh", overflow: "hidden" }}>
       <svg width="100%" height="100%" onWheel={onWheel}>
-        {/* year labels toward the center of each constellation */}
+        {/* year labels */}
         {yearGroups.map((g) => (
           <text
             key={`y-${g.year}`}
@@ -414,7 +416,7 @@ export default function App() {
         ))}
       </svg>
 
-      {/* CONTROLS (top-center) */}
+      {/* controls */}
       <div
         style={{
           ...panelStyle,
@@ -519,7 +521,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* search dropdown */}
         {searchResults.length > 0 && (
           <div
             style={{
@@ -549,9 +550,6 @@ export default function App() {
                   {n.name}
                 </button>
               ))}
-            </div>
-            <div style={{ opacity: 0.7, marginTop: 6 }}>
-              Tip: press Enter to jump to first match
             </div>
           </div>
         )}
@@ -618,9 +616,7 @@ export default function App() {
           {profileLine("Artists", active.artists)}
           {profileLine("Roles", active.roles)}
           {profileLine("Geek", active.geek)}
-          {active.collab
-            ? profileLine("Collab", [String(active.collab)])
-            : null}
+          {active.collab ? profileLine("Collab", [String(active.collab)]) : null}
         </div>
       )}
     </div>

@@ -361,5 +361,48 @@
   "artists": "nirvana, iron maiden, radiohead",
   "roles": "instrumentalist",
   "geek": "gaming,film,sports"
-}
+},
+{
+ "id": "s-34",
+  "name": "kleja",
+  "year": "year 10",
+  "collab": "yes",
+  "instruments": "piano,keyboard",
+  "genres": "rock,pop,jazz,folk,film,rap",
+  "artists": "laufey,adele,yuja Wang",
+  "roles": "instrumentalist",
+  "geek": "dance,fashion,writing,reading"
+},
+  "id": "s-35",
+  "name": "dilan",
+  "year": "year 10",
+  "collab": "maybe",
+  "instruments": "voice,guitar,ukulele",
+  "genres": "pop,jazz,rap,electronic,film",
+  "artists": "olivia dean,billie eilish,jorja smith",
+  "roles": "singer,songwriter",
+  "geek": "drawing,dance,photography,reading"
+  },
+  "id": "s-36",
+  "name": "ananya",
+  "year": "year 9",
+  "collab": "maybe",
+  "instruments": "guitar",
+  "genres": "pop,rock,game,folk,film",
+  "artists": "artic monkeys,the goo goo dolls,gorillaz",
+  "roles": "instrumentalist",
+  "geek": "gaming,anime,reading"
+  },
+   "id": "s-37",
+  "name": "aravius",
+  "year": "year 9",
+  "collab": "maybe",
+  "instruments": "piano,keyboard",
+  "genres": "rock,jazz,electronic,game,film",
+  "artists": "sergei rachmaninoff,AZALI0013,deftones",
+  "roles": "instrumentalist,songwriter",
+  "geek": "gaming,coding,film,anime,reading"
+  },
+  
 ]
+

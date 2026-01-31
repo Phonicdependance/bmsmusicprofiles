@@ -2,17 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import datasetRaw from "./data.json";
 
 /* =========================================================
-   CONSTELLATION CIRCLE (single-select)
-   - Symmetrical year-group constellations around a big circle
-   - Year labels inside each constellation ("Year 7", "Year 8", ...)
-   - Straight connection lines
-   - Connection mode dropdown (instrument / influences / ideal band)
-   - Year filter (All / Y7 / Y8 / ...)
-   - Links Top-N slider (min 3)
-   - Search by name (jump/select)
-   - Navigate selection: Left/Right arrows + mouse wheel
-   - Top-left: selected + connections (raised)
-   - Bottom-right: profile
+   Constellation Circle (year-group clusters)
+   - Year constellations arranged around a big circle
+   - Straight links based on selectable matching mode
+   - Rotate with mouse wheel or left/right arrows
+   - Search by name to select
+   - Mobile-first UI: bottom drawer tabs
    ========================================================= */
 
 /* ---------- utilities ---------- */
@@ -35,26 +30,14 @@ function yearToNumber(y) {
   return m ? Number(m[1]) : null;
 }
 
-/* ---------- dataset ---------- */
-
-function normalizeDataset(raw) {
-  return (Array.isArray(raw) ? raw : []).map((d, i) => ({
-    id: d.id ?? `s-${i}`,
-    name: d.name ?? d.id ?? `Student ${i + 1}`,
-    year: yearToNumber(d.year),
-    instruments: toArrayLoose(d.instruments),
-    genres: toArrayLoose(d.genres),
-    artists: toArrayLoose(d.artists),
-    roles: toArrayLoose(d.roles),
-    geek: toArrayLoose(d.geek),
-    collab: d.collab ?? "",
-  }));
+function normToken(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .trim();
 }
 
-/* ---------- similarity ---------- */
-
 function toSet(arr) {
-  return new Set((arr || []).map((x) => String(x).toLowerCase()));
+  return new Set((arr || []).map((x) => normToken(x)).filter(Boolean));
 }
 
 function overlapCount(A, B) {
@@ -63,124 +46,63 @@ function overlapCount(A, B) {
   return c;
 }
 
-function scoreInstrument(a, b) {
-  return overlapCount(toSet(a.instruments), toSet(b.instruments)) * 3;
+/* ---------- dataset ---------- */
+
+function normalizeDataset(raw) {
+  return (Array.isArray(raw) ? raw : []).map((d, i) => ({
+    id: d.id ?? `s-${i + 1}`,
+    name: d.name ?? d.id ?? `Student ${i + 1}`,
+    year: yearToNumber(d.year),
+    instruments: toArrayLoose(d.instruments ?? d.instrument),
+    genres: toArrayLoose(d.genres),
+    artists: toArrayLoose(d.artists ?? d.arists),
+    roles: toArrayLoose(d.roles),
+    geek: toArrayLoose(d.geek),
+    collab: d.collab ?? "",
+  }));
 }
 
-function scoreInfluences(a, b) {
-  return (
-    overlapCount(toSet(a.artists), toSet(b.artists)) * 3 +
-    overlapCount(toSet(a.genres), toSet(b.genres)) * 2
-  );
-}
+/* ---------- matching ---------- */
 
-function scoreIdealBand(a, b) {
-  return (
-    overlapCount(toSet(a.instruments), toSet(b.instruments)) * 2 +
-    overlapCount(toSet(a.roles), toSet(b.roles)) * 2 +
-    overlapCount(toSet(a.genres), toSet(b.genres)) * 2 +
-    overlapCount(toSet(a.artists), toSet(b.artists)) * 2 +
-    overlapCount(toSet(a.geek), toSet(b.geek)) * 1
-  );
-}
+const CONNECT_MODES = [
+  { key: "ideal", label: "Ideal band" },
+  { key: "instruments", label: "Same instruments" },
+  { key: "influences", label: "Similar influences" },
+];
 
-function similarityScore(a, b, mode) {
+function scoreForMode(a, b, modeKey) {
   if (!a || !b || a.id === b.id) return 0;
-  if (mode === "instrument") return scoreInstrument(a, b);
-  if (mode === "influences") return scoreInfluences(a, b);
-  return scoreIdealBand(a, b);
-}
 
-/* ---------- symmetrical constellation layout ---------- */
+  const aInst = toSet(a.instruments);
+  const bInst = toSet(b.instruments);
 
-function computeConstellationPositions(data, W, H) {
-  const cx = W / 2;
-  const cy = H / 2;
+  const aGenres = toSet(a.genres);
+  const bGenres = toSet(b.genres);
 
-  const margin = 28;
-  const outerR = Math.max(0, Math.min(W, H) / 2 - margin);
+  const aArtists = toSet(a.artists);
+  const bArtists = toSet(b.artists);
 
-  const byYear = new Map();
-  for (const d of data) {
-    const y = d.year ?? 99;
-    if (!byYear.has(y)) byYear.set(y, []);
-    byYear.get(y).push(d);
+  const aRoles = toSet(a.roles);
+  const bRoles = toSet(b.roles);
+
+  const aGeek = toSet(a.geek);
+  const bGeek = toSet(b.geek);
+
+  if (modeKey === "instruments") {
+    return overlapCount(aInst, bInst) * 5;
   }
 
-  const years = [...byYear.keys()].sort((a, b) => a - b);
-  const groupCount = Math.max(1, years.length);
+  if (modeKey === "influences") {
+    return overlapCount(aArtists, bArtists) * 4 + overlapCount(aGenres, bGenres) * 2;
+  }
 
-  // group centers around a ring (slightly elliptical to fit screens nicely)
-  const groupRingRx = outerR * 0.66;
-  const groupRingRy = outerR * 0.5;
-
-  const localR = clamp(outerR * 0.18, 22, 110);
-  const offset = -Math.PI / 2;
-
-  const nodes = [];
-  const groups = [];
-
-  years.forEach((y, gi) => {
-    const group = byYear.get(y) || [];
-    const ga = offset + (gi / groupCount) * Math.PI * 2;
-
-    const gcx = cx + Math.cos(ga) * groupRingRx;
-    const gcy = cy + Math.sin(ga) * groupRingRy;
-
-    // label placed toward center of canvas for navigation clarity
-    const labelX = cx + (gcx - cx) * 0.55;
-    const labelY = cy + (gcy - cy) * 0.55;
-
-    groups.push({ year: y, gcx, gcy, labelX, labelY });
-
-    const sorted = [...group].sort((a, b) =>
-      String(a.name).localeCompare(String(b.name))
-    );
-
-    const count = sorted.length;
-    const ringR = count <= 1 ? 0 : count === 2 ? localR * 0.45 : localR * 0.86;
-
-    const localOffset = ga - Math.PI / 2;
-
-    sorted.forEach((d, i) => {
-      const a =
-        count <= 1
-          ? localOffset
-          : localOffset + (i / count) * Math.PI * 2;
-
-      nodes.push({
-        ...d,
-        cx: gcx + Math.cos(a) * ringR,
-        cy: gcy + Math.sin(a) * ringR,
-      });
-    });
-  });
-
-  return { nodes, groups };
-}
-
-/* ---------- single fill bar ---------- */
-
-function FillBar({ value01 }) {
-  const v = clamp(value01 ?? 0, 0, 1);
+  // "ideal" (balanced)
   return (
-    <div
-      style={{
-        width: 92,
-        height: 10,
-        border: "1px solid rgba(0,255,100,0.45)",
-        background: "rgba(0,255,100,0.1)",
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          width: `${Math.round(v * 100)}%`,
-          height: "100%",
-          background: "#00ff66",
-        }}
-      />
-    </div>
+    overlapCount(aInst, bInst) * 3 +
+    overlapCount(aGenres, bGenres) * 2 +
+    overlapCount(aArtists, bArtists) * 2 +
+    overlapCount(aRoles, bRoles) * 1 +
+    overlapCount(aGeek, bGeek) * 0.75
   );
 }
 
@@ -196,70 +118,225 @@ function useViewport() {
   return vp;
 }
 
+/* ---------- constellation layout ---------- */
+
+function computeConstellationPositions(dataset, W, H, rotation = 0, yearFilter = "all") {
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // Big ring radius (where year cluster centers sit)
+  const R = Math.min(W, H) * 0.28;
+
+  // Cluster (within-year) radius
+  const rBase = Math.min(W, H) * 0.06;
+
+  // Years present (sorted)
+  const years = [...new Set(dataset.map((d) => d.year).filter((y) => y != null))]
+    .sort((a, b) => a - b);
+
+  const byYear = new Map();
+  years.forEach((y) => byYear.set(y, []));
+  dataset.forEach((d) => {
+    if (d.year != null) byYear.get(d.year)?.push(d);
+  });
+
+  const yearCenters = new Map();
+  const offset = -Math.PI / 2 + rotation;
+
+  years.forEach((y, idx) => {
+    const a = offset + (idx / years.length) * Math.PI * 2;
+    const x = cx + Math.cos(a) * R;
+    const yPos = cy + Math.sin(a) * R;
+    yearCenters.set(y, { x, y: yPos, a });
+  });
+
+  // Place students around each year center as a small ring
+  const nodes = [];
+  years.forEach((yr) => {
+    const arr = byYear.get(yr) || [];
+    const center = yearCenters.get(yr);
+    if (!center) return;
+
+    const localR = rBase * clamp(0.7 + arr.length * 0.06, 0.8, 1.6);
+    const localOffset = -Math.PI / 2 + center.a * 0.35;
+
+    arr
+      .slice()
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+      .forEach((d, i) => {
+        const t = arr.length <= 1 ? 0 : (i / arr.length) * Math.PI * 2;
+        const ang = localOffset + t;
+        nodes.push({
+          ...d,
+          cx: center.x + Math.cos(ang) * localR,
+          cy: center.y + Math.sin(ang) * localR,
+          _yearCenter: center,
+        });
+      });
+  });
+
+  const filteredNodes =
+    yearFilter === "all"
+      ? nodes
+      : nodes.filter((n) => n.year === Number(yearFilter));
+
+  return { nodes: filteredNodes, yearCenters, years };
+}
+
+/* ---------- small UI helpers ---------- */
+
+function FillBar({ value01 }) {
+  const v = clamp(value01 ?? 0, 0, 1);
+  return (
+    <div
+      style={{
+        width: 86,
+        height: 9,
+        border: "1px solid rgba(0,255,100,0.45)",
+        background: "rgba(0,255,100,0.10)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          width: `${Math.round(v * 100)}%`,
+          height: "100%",
+          background: "#00ff66",
+        }}
+      />
+    </div>
+  );
+}
+
+const mono = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+
+function pillBtnStyle(active) {
+  return {
+    appearance: "none",
+    border: "1px solid rgba(0,255,100,0.35)",
+    background: active ? "rgba(0,255,100,0.18)" : "rgba(0,0,0,0.35)",
+    color: "#00ff66",
+    fontFamily: mono,
+    fontSize: 11,
+    padding: "6px 10px",
+    cursor: "pointer",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  };
+}
+
+function selectStyle() {
+  return {
+    border: "1px solid rgba(0,255,100,0.35)",
+    background: "rgba(0,0,0,0.35)",
+    color: "#00ff66",
+    fontFamily: mono,
+    fontSize: 12,
+    padding: "6px 8px",
+    outline: "none",
+  };
+}
+
+function inputStyle() {
+  return {
+    border: "1px solid rgba(0,255,100,0.35)",
+    background: "rgba(0,0,0,0.35)",
+    color: "#00ff66",
+    fontFamily: mono,
+    fontSize: 12,
+    padding: "6px 8px",
+    outline: "none",
+    width: "100%",
+  };
+}
+
 /* ========================================================= */
 
 export default function App() {
   const { w: W, h: H } = useViewport();
+  const isMobile = W < 720;
+
   const dataset = useMemo(() => normalizeDataset(datasetRaw), []);
 
-  const years = useMemo(() => {
-    return Array.from(
-      new Set(dataset.map((d) => d.year).filter((y) => y != null))
-    ).sort((a, b) => a - b);
-  }, [dataset]);
+  const [rotation, setRotation] = useState(0);
+  const [activeId, setActiveId] = useState(null);
 
-  const [mode, setMode] = useState("band"); // instrument | influences | band
-  const [yearFilter, setYearFilter] = useState("all"); // all | number (as string)
-  const [topN, setTopN] = useState(10);
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState(null);
+  const [connectMode, setConnectMode] = useState("ideal");
+  const [yearFilter, setYearFilter] = useState("all");
 
-  const filtered = useMemo(() => {
-    if (yearFilter === "all") return dataset;
-    const y = Number(yearFilter);
-    return dataset.filter((d) => d.year === y);
-  }, [dataset, yearFilter]);
+  const [linksN, setLinksN] = useState(isMobile ? 3 : 6);
+  const minLinks = 3;
+  const maxLinks = isMobile ? 8 : 12;
 
-  const layout = useMemo(() => computeConstellationPositions(filtered, W, H), [
-    filtered,
-    W,
-    H,
-  ]);
-  const nodes = layout.nodes;
-  const yearGroups = layout.groups;
+  const [search, setSearch] = useState("");
 
+  // mobile drawer tab
+  const [mobileTab, setMobileTab] = useState("profile"); // profile | matches | controls
+
+  const active = useMemo(() => {
+    if (!activeId) return null;
+    return dataset.find((d) => d.id === activeId) || null;
+  }, [activeId, dataset]);
+
+  const { nodes, yearCenters, years } = useMemo(
+    () => computeConstellationPositions(dataset, W, H, rotation, yearFilter),
+    [dataset, W, H, rotation, yearFilter]
+  );
+
+  // Ensure active stays visible when filtering
   useEffect(() => {
-    if (!active) return;
-    const exists = nodes.some((n) => n.id === active.id);
-    if (!exists) setActive(null);
-  }, [nodes, active]);
+    if (!activeId) return;
+    const existsInView = nodes.some((n) => n.id === activeId);
+    if (!existsInView) setActiveId(null);
+  }, [yearFilter, nodes, activeId]);
 
-  const orderedNodes = useMemo(() => {
-    const byYear = new Map();
-    for (const n of nodes) {
-      const y = n.year ?? 99;
-      if (!byYear.has(y)) byYear.set(y, []);
-      byYear.get(y).push(n);
-    }
-    const ys = [...byYear.keys()].sort((a, b) => a - b);
-    const out = [];
-    ys.forEach((y) => {
-      const group = byYear.get(y) || [];
-      group.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-      out.push(...group);
-    });
-    return out;
-  }, [nodes]);
+  // Wheel rotate
+  useEffect(() => {
+    const onWheel = (e) => {
+      // only rotate if cursor is over the app (not on inputs)
+      const tag = (e.target && e.target.tagName) || "";
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
 
+      e.preventDefault?.();
+      const delta = e.deltaY || 0;
+      setRotation((r) => r + delta * 0.0015);
+    };
+
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Arrow rotate
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "ArrowLeft") setRotation((r) => r - 0.08);
+      if (e.key === "ArrowRight") setRotation((r) => r + 0.08);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Search select
+  const searchMatches = useMemo(() => {
+    const q = normToken(search);
+    if (!q) return [];
+    const list = dataset
+      .filter((d) => normToken(d.name).includes(q))
+      .slice(0, 8);
+    return list;
+  }, [search, dataset]);
+
+  // Links
   const links = useMemo(() => {
     if (!active) return [];
 
-    const scored = nodes
+    const viewNodes = nodes; // only link to visible nodes
+    const scored = viewNodes
       .filter((n) => n.id !== active.id)
-      .map((n) => ({ n, s: similarityScore(active, n, mode) }))
+      .map((n) => ({ n, s: scoreForMode(active, n, connectMode) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s)
-      .slice(0, clamp(topN, 3, 40));
+      .slice(0, clamp(linksN, minLinks, maxLinks));
 
     const max = scored[0]?.s ?? 1;
 
@@ -269,21 +346,32 @@ export default function App() {
         from: active,
         to: n,
         ratio,
-        width: 1.0 + ratio * 3.6,
+        width: 1.1 + ratio * (isMobile ? 2.2 : 3.0),
       };
     });
-  }, [active, nodes, mode, topN]);
+  }, [active, nodes, connectMode, linksN, minLinks, maxLinks, isMobile]);
 
-  const panelStyle = {
+  // Matches list content (names + bars)
+  const matchesList = useMemo(() => {
+    if (!active) return [];
+    return links.map((l) => ({
+      id: l.to.id,
+      name: l.to.name,
+      ratio: l.ratio,
+      year: l.to.year,
+    }));
+  }, [links, active]);
+
+  // panels
+  const panelBase = {
     position: "absolute",
-    background: "rgba(0,0,0,0.92)",
-    border: "1px solid rgba(0,255,100,0.4)",
+    background: "rgba(0,0,0,0.90)",
+    border: "1px solid rgba(0,255,100,0.35)",
     color: "#00ff66",
-    padding: 8,
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    padding: 10,
+    fontFamily: mono,
     fontSize: 11,
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     textTransform: "uppercase",
   };
 
@@ -291,102 +379,35 @@ export default function App() {
     const arr = Array.isArray(arrOrStr) ? arrOrStr : toArrayLoose(arrOrStr);
     if (!arr.length) return null;
     return (
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ opacity: 0.8, marginBottom: 2 }}>{label}</div>
-        <div style={{ textTransform: "none", letterSpacing: 0 }}>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ opacity: 0.8, marginBottom: 3 }}>{label}</div>
+        <div style={{ textTransform: "none", letterSpacing: 0, lineHeight: 1.35 }}>
           {arr.join(", ")}
         </div>
       </div>
     );
   };
 
-  const moveActive = (dir) => {
-    if (!orderedNodes.length) return;
-    const idx = active ? orderedNodes.findIndex((n) => n.id === active.id) : -1;
-    const nextIdx =
-      idx === -1
-        ? 0
-        : (idx + (dir > 0 ? 1 : -1) + orderedNodes.length) %
-          orderedNodes.length;
-    setActive(orderedNodes[nextIdx]);
+  // tap/click select
+  const onSelectNode = (id) => {
+    setActiveId((p) => (p === id ? null : id));
+    if (isMobile) setMobileTab("profile");
   };
 
-  // No eslint-disable comment, no react-hooks rule required
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        moveActive(+1);
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        moveActive(-1);
-      } else if (e.key === "Escape") {
-        setActive(null);
-      } else if (e.key === "Enter") {
-        const q = query.trim().toLowerCase();
-        if (!q) return;
-        const match = nodes
-          .slice()
-          .sort((a, b) => String(a.name).localeCompare(String(b.name)))
-          .find((n) => String(n.name).toLowerCase().includes(q));
-        if (match) setActive(match);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown, { passive: false });
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [query, nodes, active, orderedNodes]);
-
-  const wheelCooldown = useRef(0);
-  const onWheel = (e) => {
-    const now = Date.now();
-    if (now - wheelCooldown.current < 120) return;
-    wheelCooldown.current = now;
-
-    const dy = e.deltaY ?? 0;
-    if (Math.abs(dy) < 4) return;
-    moveActive(dy > 0 ? +1 : -1);
-  };
-
-  const yearLabel = (y) => {
-    if (y == null || y === 99) return "";
-    return `Year ${y}`;
-  };
-
-  const searchResults = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return nodes
-      .filter((n) => String(n.name).toLowerCase().includes(q))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
-      .slice(0, 8);
-  }, [query, nodes]);
-
+  // touchAction none helps mobile
   return (
-    <div style={{ background: "#000", height: "100vh", overflow: "hidden" }}>
-      <svg width="100%" height="100%" onWheel={onWheel}>
-        {/* year labels */}
-        {yearGroups.map((g) => (
-          <text
-            key={`y-${g.year}`}
-            x={g.labelX}
-            y={g.labelY}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            style={{
-              fill: "rgba(0,255,102,0.62)",
-              fontFamily:
-                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              fontSize: 11,
-              letterSpacing: 1.1,
-              userSelect: "none",
-            }}
-          >
-            {yearLabel(g.year)}
-          </text>
-        ))}
-
-        {/* straight connections */}
+    <div
+      style={{
+        background: "#000",
+        height: "100vh",
+        overflow: "hidden",
+        touchAction: "none",
+        position: "relative",
+      }}
+    >
+      {/* SVG space */}
+      <svg width="100%" height="100%">
+        {/* links */}
         {links.map((l) => (
           <line
             key={l.to.id}
@@ -397,7 +418,7 @@ export default function App() {
             stroke="#cfd6df"
             strokeWidth={l.width}
             strokeLinecap="round"
-            opacity={0.78}
+            opacity={isMobile ? 0.55 : 0.75}
           />
         ))}
 
@@ -407,207 +428,198 @@ export default function App() {
             key={d.id}
             cx={d.cx}
             cy={d.cy}
-            r={d.id === active?.id ? 11 : 9}
+            r={d.id === activeId ? (isMobile ? 10 : 11) : (isMobile ? 8 : 9)}
             fill="#e5e9ef"
             opacity={0.9}
-            onPointerDown={() => setActive((p) => (p?.id === d.id ? null : d))}
+            onPointerDown={() => onSelectNode(d.id)}
             style={{ cursor: "pointer" }}
           />
         ))}
+
+        {/* year labels */}
+        {Array.from(yearCenters.entries()).map(([yr, c]) => {
+          if (yearFilter !== "all" && Number(yearFilter) !== yr) return null;
+          return (
+            <text
+              key={`label-${yr}`}
+              x={c.x}
+              y={c.y}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill="#00ff66"
+              opacity={0.75}
+              style={{
+                fontFamily: mono,
+                fontSize: isMobile ? 11 : 12,
+                letterSpacing: 0.6,
+              }}
+            >
+              {`Year ${yr}`}
+            </text>
+          );
+        })}
       </svg>
 
-      {/* controls */}
-      <div
-        style={{
-          ...panelStyle,
-          top: 12,
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: 560,
-        }}
-      >
+      {/* ===== Desktop controls (top) ===== */}
+      {!isMobile && (
         <div
           style={{
-            display: "flex",
+            ...panelBase,
+            top: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 640,
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
             gap: 12,
             alignItems: "center",
-            flexWrap: "wrap",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ opacity: 0.85 }}>Connect:</div>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
+            <div style={{ alignSelf: "center" }}>Connect:</div>
             <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-              style={{
-                background: "rgba(0,0,0,0.65)",
-                color: "#00ff66",
-                border: "1px solid rgba(0,255,100,0.35)",
-                padding: "4px 6px",
-                fontFamily:
-                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                fontSize: 11,
-                outline: "none",
-              }}
+              style={selectStyle()}
+              value={connectMode}
+              onChange={(e) => setConnectMode(e.target.value)}
             >
-              <option value="instrument">Same instrument</option>
-              <option value="influences">Similar influences</option>
-              <option value="band">Ideal band</option>
-            </select>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ opacity: 0.85 }}>Year:</div>
-            <select
-              value={yearFilter}
-              onChange={(e) => setYearFilter(e.target.value)}
-              style={{
-                background: "rgba(0,0,0,0.65)",
-                color: "#00ff66",
-                border: "1px solid rgba(0,255,100,0.35)",
-                padding: "4px 6px",
-                fontFamily:
-                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                fontSize: 11,
-                outline: "none",
-              }}
-            >
-              <option value="all">All</option>
-              {years.map((y) => (
-                <option key={y} value={String(y)}>
-                  Y{y}
+              {CONNECT_MODES.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.label}
                 </option>
               ))}
             </select>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ opacity: 0.85 }}>Links:</div>
+          <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 10 }}>
+            <div style={{ alignSelf: "center" }}>Year:</div>
+            <select
+              style={selectStyle()}
+              value={yearFilter}
+              onChange={(e) => setYearFilter(e.target.value)}
+            >
+              <option value="all">All</option>
+              {years.map((y) => (
+                <option key={y} value={String(y)}>
+                  {`Y${y}`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 40px", gap: 10 }}>
+            <div style={{ alignSelf: "center" }}>Links:</div>
             <input
               type="range"
-              min="3"
-              max="16"
-              value={topN}
-              onChange={(e) => setTopN(Number(e.target.value))}
-              style={{ width: 160 }}
+              min={minLinks}
+              max={maxLinks}
+              value={clamp(linksN, minLinks, maxLinks)}
+              onChange={(e) => setLinksN(Number(e.target.value))}
             />
-            <div style={{ minWidth: 28, textAlign: "right" }}>{topN}</div>
+            <div style={{ alignSelf: "center", textAlign: "right" }}>
+              {clamp(linksN, minLinks, maxLinks)}
+            </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ opacity: 0.85 }}>Find:</div>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="type a name..."
-              style={{
-                width: 160,
-                background: "rgba(0,0,0,0.65)",
-                color: "#00ff66",
-                border: "1px solid rgba(0,255,100,0.35)",
-                padding: "4px 6px",
-                fontFamily:
-                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                fontSize: 11,
-                outline: "none",
-                textTransform: "none",
-                letterSpacing: 0,
-              }}
-            />
+          <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 10 }}>
+            <div style={{ alignSelf: "center" }}>Find:</div>
+            <div style={{ position: "relative" }}>
+              <input
+                style={inputStyle()}
+                placeholder="type a name..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {searchMatches.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: 34,
+                    background: "rgba(0,0,0,0.95)",
+                    border: "1px solid rgba(0,255,100,0.35)",
+                    zIndex: 20,
+                  }}
+                >
+                  {searchMatches.map((s) => (
+                    <div
+                      key={s.id}
+                      onPointerDown={() => {
+                        setActiveId(s.id);
+                        setSearch("");
+                      }}
+                      style={{
+                        padding: "8px 10px",
+                        cursor: "pointer",
+                        textTransform: "none",
+                        letterSpacing: 0,
+                      }}
+                    >
+                      {s.name} {s.year ? ` (Y${s.year})` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div style={{ opacity: 0.75, marginLeft: "auto" }}>
+          <div style={{ gridColumn: "1 / -1", opacity: 0.75, textAlign: "right" }}>
             ← / → or wheel
           </div>
         </div>
+      )}
 
-        {searchResults.length > 0 && (
-          <div
-            style={{
-              marginTop: 8,
-              borderTop: "1px solid rgba(0,255,100,0.25)",
-              paddingTop: 8,
-            }}
-          >
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {searchResults.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => setActive(n)}
-                  style={{
-                    background: "rgba(0,0,0,0.65)",
-                    color: "#00ff66",
-                    border: "1px solid rgba(0,255,100,0.35)",
-                    padding: "4px 8px",
-                    cursor: "pointer",
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                    fontSize: 11,
-                    textTransform: "none",
-                    letterSpacing: 0,
-                  }}
-                >
-                  {n.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* TOP-LEFT: selected + connections (raised) */}
-      {active && (
-        <div style={{ ...panelStyle, top: 64, left: 12, width: 260 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>
-            {active.name} {active.year ? `(Y${active.year})` : ""}
+      {/* ===== Desktop: Matches panel (top-left) ===== */}
+      {!isMobile && active && (
+        <div style={{ ...panelBase, top: 12, left: 12, width: 300 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>
+            {String(active.name).toUpperCase()} {active.year ? `(Y${active.year})` : ""}
           </div>
 
-          {links.length === 0 ? (
-            <div style={{ opacity: 0.75 }}>No matches found.</div>
-          ) : (
-            links.map((l) => (
+          {matchesList.map((m) => (
+            <div
+              key={m.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+                gap: 10,
+              }}
+            >
               <div
-                key={l.to.id}
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 8,
-                  gap: 10,
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  textTransform: "none",
+                  letterSpacing: 0,
+                  cursor: "pointer",
                 }}
+                onPointerDown={() => setActiveId(m.id)}
               >
-                <div
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {l.to.name}
-                </div>
-                <FillBar value01={l.ratio} />
+                {m.name}
               </div>
-            ))
-          )}
+              <FillBar value01={m.ratio} />
+            </div>
+          ))}
         </div>
       )}
 
-      {/* BOTTOM-RIGHT: profile */}
-      {active && (
-        <div style={{ ...panelStyle, bottom: 12, right: 12, width: 300 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+      {/* ===== Desktop: Profile panel (bottom-right) ===== */}
+      {!isMobile && active && (
+        <div style={{ ...panelBase, bottom: 12, right: 12, width: 300 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>
             Profile
           </div>
 
           {profileLine("Student", [active.name])}
           {active.year != null && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ opacity: 0.8, marginBottom: 2 }}>Year</div>
-              <div style={{ textTransform: "none", letterSpacing: 0 }}>
-                {active.year}
-              </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ opacity: 0.8, marginBottom: 3 }}>Year</div>
+              <div style={{ textTransform: "none", letterSpacing: 0 }}>{active.year}</div>
             </div>
           )}
 
@@ -617,6 +629,218 @@ export default function App() {
           {profileLine("Roles", active.roles)}
           {profileLine("Geek", active.geek)}
           {active.collab ? profileLine("Collab", [String(active.collab)]) : null}
+        </div>
+      )}
+
+      {/* ===== Mobile: Bottom drawer ===== */}
+      {isMobile && (
+        <div
+          style={{
+            position: "absolute",
+            left: 10,
+            right: 10,
+            bottom: 10,
+            background: "rgba(0,0,0,0.92)",
+            border: "1px solid rgba(0,255,100,0.35)",
+            color: "#00ff66",
+            fontFamily: mono,
+            fontSize: 11,
+            padding: 10,
+            maxHeight: "44vh",
+            overflow: "auto",
+            borderRadius: 6,
+          }}
+        >
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <button
+              style={pillBtnStyle(mobileTab === "profile")}
+              onClick={() => setMobileTab("profile")}
+            >
+              Profile
+            </button>
+            <button
+              style={pillBtnStyle(mobileTab === "matches")}
+              onClick={() => setMobileTab("matches")}
+              disabled={!active}
+            >
+              Matches
+            </button>
+            <button
+              style={pillBtnStyle(mobileTab === "controls")}
+              onClick={() => setMobileTab("controls")}
+            >
+              Controls
+            </button>
+          </div>
+
+          {/* Content */}
+          {mobileTab === "profile" && (
+            <div>
+              {active ? (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>
+                    {active.name} {active.year ? `(Y${active.year})` : ""}
+                  </div>
+                  {profileLine("Instruments", active.instruments)}
+                  {profileLine("Genres", active.genres)}
+                  {profileLine("Artists", active.artists)}
+                  {profileLine("Roles", active.roles)}
+                  {profileLine("Geek", active.geek)}
+                  {active.collab ? profileLine("Collab", [String(active.collab)]) : null}
+                </>
+              ) : (
+                <div style={{ opacity: 0.75, textTransform: "none", letterSpacing: 0 }}>
+                  Tap a student circle to view profile.
+                </div>
+              )}
+            </div>
+          )}
+
+          {mobileTab === "matches" && (
+            <div>
+              {active ? (
+                <>
+                  <div style={{ fontWeight: 800, marginBottom: 10 }}>
+                    Matches ({matchesList.length})
+                  </div>
+                  {matchesList.map((m) => (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        padding: "8px 0",
+                        borderBottom: "1px solid rgba(0,255,100,0.12)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          textTransform: "none",
+                          letterSpacing: 0,
+                          cursor: "pointer",
+                        }}
+                        onPointerDown={() => setActiveId(m.id)}
+                      >
+                        {m.name} {m.year ? `(Y${m.year})` : ""}
+                      </div>
+                      <FillBar value01={m.ratio} />
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div style={{ opacity: 0.75, textTransform: "none", letterSpacing: 0 }}>
+                  Select a student first.
+                </div>
+              )}
+            </div>
+          )}
+
+          {mobileTab === "controls" && (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10 }}>
+                <div style={{ alignSelf: "center" }}>Connect:</div>
+                <select
+                  style={selectStyle()}
+                  value={connectMode}
+                  onChange={(e) => setConnectMode(e.target.value)}
+                >
+                  {CONNECT_MODES.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 10 }}>
+                <div style={{ alignSelf: "center" }}>Year:</div>
+                <select
+                  style={selectStyle()}
+                  value={yearFilter}
+                  onChange={(e) => setYearFilter(e.target.value)}
+                >
+                  <option value="all">All</option>
+                  {years.map((y) => (
+                    <option key={y} value={String(y)}>
+                      {`Y${y}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 40px", gap: 10 }}>
+                <div style={{ alignSelf: "center" }}>Links:</div>
+                <input
+                  type="range"
+                  min={minLinks}
+                  max={maxLinks}
+                  value={clamp(linksN, minLinks, maxLinks)}
+                  onChange={(e) => setLinksN(Number(e.target.value))}
+                />
+                <div style={{ alignSelf: "center", textAlign: "right" }}>
+                  {clamp(linksN, minLinks, maxLinks)}
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 10 }}>
+                <div style={{ alignSelf: "center" }}>Find:</div>
+                <div style={{ position: "relative" }}>
+                  <input
+                    style={inputStyle()}
+                    placeholder="type a name..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                  {searchMatches.length > 0 && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        top: 34,
+                        background: "rgba(0,0,0,0.96)",
+                        border: "1px solid rgba(0,255,100,0.35)",
+                        zIndex: 30,
+                        maxHeight: 160,
+                        overflow: "auto",
+                      }}
+                    >
+                      {searchMatches.map((s) => (
+                        <div
+                          key={s.id}
+                          onPointerDown={() => {
+                            setActiveId(s.id);
+                            setSearch("");
+                            setMobileTab("profile");
+                          }}
+                          style={{
+                            padding: "8px 10px",
+                            cursor: "pointer",
+                            textTransform: "none",
+                            letterSpacing: 0,
+                          }}
+                        >
+                          {s.name} {s.year ? ` (Y${s.year})` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ opacity: 0.75, textTransform: "none", letterSpacing: 0 }}>
+                Rotate: wheel or ← / →
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
